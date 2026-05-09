@@ -1,0 +1,5 @@
+# No external dependencies — uses Python standard library only.
+# Requires Python 3.8+
+#
+# stdlib modules used:
+#   urllib.request, subprocess, shutil, os, sys, platform, datetime

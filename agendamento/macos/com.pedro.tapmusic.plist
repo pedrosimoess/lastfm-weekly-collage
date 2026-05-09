@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent — runs tapmusic.py every Friday at 9:00 AM.
+
+  BEFORE INSTALLING: edit the paths below to match your system.
+    - ProgramArguments[0]: path to your Python (virtual env or system)
+    - ProgramArguments[1]: absolute path to tapmusic.py
+    - WorkingDirectory:    same folder as tapmusic.py
+    - StandardOutPath /
+      StandardErrorPath:   where to write the log
+
+  INSTALL:
+    cp agendamento/macos/com.pedro.tapmusic.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.pedro.tapmusic.plist
+
+  UNINSTALL:
+    launchctl unload ~/Library/LaunchAgents/com.pedro.tapmusic.plist
+    rm ~/Library/LaunchAgents/com.pedro.tapmusic.plist
+
+  RUN MANUALLY (for testing):
+    launchctl start com.pedro.tapmusic
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.pedro.tapmusic</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <!-- adjust to your Python path; use `which python3` or venv path -->
+        <string>/Users/pedro/tapmusic-env/bin/python</string>
+        <string>/Users/pedro/Códigos/LastfmAutomacao/tapmusic.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/pedro/Códigos/LastfmAutomacao</string>
+
+    <!-- Every Friday (Weekday=5) at 09:00 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>5</integer>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/pedro/Códigos/LastfmAutomacao/Logs/tapmusic.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/pedro/Códigos/LastfmAutomacao/Logs/tapmusic.log</string>
+
+    <!-- Run as soon as possible if the machine was off at scheduled time -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

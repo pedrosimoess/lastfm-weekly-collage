@@ -1,0 +1,28 @@
+# Generated images (keep folder, ignore contents)
+Imagens/*.png
+
+# Logs
+Logs/*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+tapmusic-env/
+venv/
+env/
+.venv/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Claude Code internal settings
+.claude/
