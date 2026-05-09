@@ -1,7 +1,7 @@
 """
 tapmusic.py — Last.fm weekly album collage generator via tapmusic.net
 Usage: python tapmusic.py
-Output: saves image to Imagens/; on macOS also imports to Photos and iCloud Drive
+Output: always saves to Imagens/; optional destinations configured below
 """
 
 import urllib.request
@@ -12,31 +12,44 @@ import sys
 import platform
 from datetime import datetime
 
-# ─── Configuration ────────────────────────────────────────────────────────────
+# ─── Last.fm settings ─────────────────────────────────────────────────────────
 USERNAME  = "pedrosexo"   # your Last.fm username
 PERIOD    = "7day"        # 7day | 1month | 3month | 6month | 12month | overall
 SIZE      = "3x3"         # 3x3 | 4x4 | 5x5 | 10x10
 CAPTIONS  = False         # show album/artist name on collage
 PLAYCOUNT = False         # show play count on collage
 
-BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
-IMAGES_DIR    = os.path.join(BASE_DIR, "Imagens")
-LOGS_DIR      = os.path.join(BASE_DIR, "Logs")
+# ─── Destination settings ─────────────────────────────────────────────────────
+# Images are always saved to Imagens/ (next to this script).
+# Enable extra destinations below as needed.
 
-# macOS only — iCloud Drive destination
-ICLOUD_FOLDER = os.path.expanduser(
+# macOS — import into the Photos app (may time out if Mac is locked)
+SAVE_TO_PHOTOS = True
+
+# macOS — copy to iCloud Drive so the image syncs to iPhone
+SAVE_TO_ICLOUD = True
+ICLOUD_FOLDER  = os.path.expanduser(
     "~/Library/Mobile Documents/com~apple~CloudDocs/Tapmusic"
 )
+
+# Any OS — copy to a custom folder (OneDrive, NAS, external drive, etc.)
+# Set SAVE_TO_CUSTOM = True and fill in CUSTOM_PATH to enable.
+SAVE_TO_CUSTOM = False
+CUSTOM_PATH    = ""
+# Examples:
+#   macOS/Linux : "/Users/you/Pictures/Tapmusic"
+#   Windows     : r"C:\Users\you\OneDrive\Tapmusic"
 # ──────────────────────────────────────────────────────────────────────────────
 
-IS_MACOS = platform.system() == "Darwin"
+BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+IMAGES_DIR = os.path.join(BASE_DIR, "Imagens")
+LOGS_DIR   = os.path.join(BASE_DIR, "Logs")
+IS_MACOS   = platform.system() == "Darwin"
 
 
 def run():
     os.makedirs(IMAGES_DIR, exist_ok=True)
     os.makedirs(LOGS_DIR, exist_ok=True)
-    if IS_MACOS:
-        os.makedirs(ICLOUD_FOLDER, exist_ok=True)
 
     date_str = datetime.now().strftime("%Y-%m-%d")
     filename = f"tapmusic_{date_str}.png"
@@ -69,8 +82,8 @@ def run():
         print(f"✗ Download error: {e}")
         sys.exit(1)
 
-    # 2. macOS: try Photos app, then always copy to iCloud Drive
-    if IS_MACOS:
+    # 2. macOS — Photos app
+    if IS_MACOS and SAVE_TO_PHOTOS:
         print("→ Importing to Photos app...")
         try:
             result = subprocess.run(
@@ -89,6 +102,9 @@ def run():
         except Exception as e:
             print(f"⚠ Photos app unavailable: {e}")
 
+    # 3. macOS — iCloud Drive
+    if IS_MACOS and SAVE_TO_ICLOUD:
+        os.makedirs(ICLOUD_FOLDER, exist_ok=True)
         icloud_dest = os.path.join(ICLOUD_FOLDER, filename)
         print(f"→ Copying to iCloud Drive/Tapmusic/{filename}...")
         try:
@@ -96,6 +112,20 @@ def run():
             print(f"✓ Copied to iCloud: {icloud_dest}")
         except Exception as e:
             print(f"✗ iCloud copy error: {e}")
+
+    # 4. Custom destination (any OS)
+    if SAVE_TO_CUSTOM:
+        if not CUSTOM_PATH:
+            print("⚠ SAVE_TO_CUSTOM is True but CUSTOM_PATH is empty — skipping.")
+        else:
+            os.makedirs(CUSTOM_PATH, exist_ok=True)
+            custom_dest = os.path.join(CUSTOM_PATH, filename)
+            print(f"→ Copying to custom path: {CUSTOM_PATH}...")
+            try:
+                shutil.copy2(output, custom_dest)
+                print(f"✓ Copied to: {custom_dest}")
+            except Exception as e:
+                print(f"✗ Custom copy error: {e}")
 
     print("Done.")
 
