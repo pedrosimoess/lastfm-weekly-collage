@@ -12,6 +12,8 @@ Automatically generates a weekly Last.fm album collage using [tapmusic.net](http
 - Saves images to `Imagens/` with date-stamped filenames (`tapmusic_YYYY-MM-DD.png`)
 - Works on **macOS, Windows, and Linux**
 - On **macOS**: also imports to the Photos app and copies to iCloud Drive (`~/iCloud Drive/Tapmusic/`)
+- Checks free disk space before downloading, so a full disk fails fast instead of mid-run
+- Retries transient download failures with exponential backoff, and validates that what was downloaded is actually a well-formed PNG
 - Zero external dependencies — Python standard library only
 
 ---
@@ -45,13 +47,30 @@ The image is saved to `Imagens/tapmusic_YYYY-MM-DD.png`.
 
 Open `tapmusic.py` and edit the block at the top:
 
-| Variable    | Default      | Options                                          |
-|-------------|--------------|--------------------------------------------------|
-| `USERNAME`  | `"pedrosexo"`| your Last.fm username                            |
-| `PERIOD`    | `"7day"`     | `7day` · `1month` · `3month` · `6month` · `12month` · `overall` |
-| `SIZE`      | `"3x3"`      | `3x3` · `4x4` · `5x5` · `10x10`                 |
-| `CAPTIONS`  | `False`      | `True` to show album/artist names                |
-| `PLAYCOUNT` | `False`      | `True` to show play counts                       |
+| Variable                      | Default       | Options                                                          |
+|--------------------------------|---------------|-------------------------------------------------------------------|
+| `USERNAME`                    | `"pedrosexo"` | your Last.fm username                                            |
+| `PERIOD`                      | `"7day"`      | `7day` · `1month` · `3month` · `6month` · `12month` · `overall` |
+| `SIZE`                        | `"3x3"`       | `3x3` · `4x4` · `5x5` · `10x10`                                 |
+| `CAPTIONS`                    | `False`       | `True` to show album/artist names                                |
+| `PLAYCOUNT`                   | `False`       | `True` to show play counts                                       |
+| `SAVE_TO_PHOTOS` (macOS)       | `True`        | import each collage into Photos                                  |
+| `PHOTOS_IMPORT_TIMEOUT_SECS`  | `60`          | seconds to wait for Photos before giving up (Photos can be slow to cold-start) |
+| `PHOTOS_IMPORT_RETRIES`       | `2`           | total attempts to import into Photos                              |
+| `SAVE_TO_ICLOUD` (macOS)       | `True`        | copy each collage to iCloud Drive                                 |
+| `SAVE_TO_CUSTOM` / `CUSTOM_PATH` | `False` / `""` | copy to any extra folder (any OS)                              |
+| `MIN_FREE_SPACE_MB`            | `100`         | abort before downloading if free disk space drops below this      |
+| `DOWNLOAD_RETRIES`             | `3`           | download attempts before giving up                                |
+| `RETRY_BACKOFF_SECS`           | `5`           | base retry delay in seconds; doubles each attempt (5s, 10s, 20s…) |
+
+---
+
+## Reliability notes
+
+- Before downloading, the script checks free disk space (`MIN_FREE_SPACE_MB`). If there isn't enough room, it fails immediately instead of wasting download retries.
+- The download step validates both the HTTP `Content-Type` and the actual PNG file signature/size, so a truncated or non-image response (e.g. an HTML error page from tapmusic.net) is treated as a retry-worthy failure rather than silently saved.
+- DNS/connectivity errors are called out explicitly in the log so it's clear when the problem is "no internet" rather than a bad response from the server.
+- The final log line reflects what actually happened: `RESULT: OK` only if every enabled step succeeded, `RESULT: PARTIAL` if the collage itself was downloaded but an optional step (Photos import, iCloud copy, custom copy) failed, `RESULT: FAIL` if the download itself failed.
 
 ---
 

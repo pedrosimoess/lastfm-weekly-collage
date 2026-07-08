@@ -12,6 +12,8 @@ Gera automaticamente uma collage semanal dos álbuns mais ouvidos no Last.fm usa
 - Salva as imagens em `Imagens/` com nome datado (`tapmusic_YYYY-MM-DD.png`)
 - Funciona em **macOS, Windows e Linux**
 - No **macOS**: também importa para o app Fotos e copia para o iCloud Drive (`~/iCloud Drive/Tapmusic/`)
+- Checa espaço livre em disco antes de baixar, evitando falhas no meio da execução por disco cheio
+- Tenta novamente downloads com falha usando backoff exponencial, e valida se o arquivo baixado é de fato um PNG bem formado
 - Sem dependências externas — usa apenas a biblioteca padrão do Python
 
 ---
@@ -45,13 +47,30 @@ A imagem é salva em `Imagens/tapmusic_YYYY-MM-DD.png`.
 
 Abra `tapmusic.py` e edite o bloco no topo:
 
-| Variável    | Padrão       | Opções                                                           |
-|-------------|--------------|------------------------------------------------------------------|
-| `USERNAME`  | `"pedrosexo"`| seu usuário do Last.fm                                           |
-| `PERIOD`    | `"7day"`     | `7day` · `1month` · `3month` · `6month` · `12month` · `overall` |
-| `SIZE`      | `"3x3"`      | `3x3` · `4x4` · `5x5` · `10x10`                                 |
-| `CAPTIONS`  | `False`      | `True` para exibir nome do álbum/artista                         |
-| `PLAYCOUNT` | `False`      | `True` para exibir contagem de plays                             |
+| Variável                       | Padrão        | Opções                                                            |
+|---------------------------------|---------------|--------------------------------------------------------------------|
+| `USERNAME`                     | `"pedrosexo"` | seu usuário do Last.fm                                            |
+| `PERIOD`                       | `"7day"`      | `7day` · `1month` · `3month` · `6month` · `12month` · `overall`  |
+| `SIZE`                         | `"3x3"`       | `3x3` · `4x4` · `5x5` · `10x10`                                  |
+| `CAPTIONS`                     | `False`       | `True` para exibir nome do álbum/artista                          |
+| `PLAYCOUNT`                    | `False`       | `True` para exibir contagem de plays                              |
+| `SAVE_TO_PHOTOS` (macOS)        | `True`        | importar cada collage para o Fotos                                 |
+| `PHOTOS_IMPORT_TIMEOUT_SECS`   | `60`          | segundos de espera pelo Fotos antes de desistir (o app pode demorar pra abrir) |
+| `PHOTOS_IMPORT_RETRIES`        | `2`           | tentativas totais de import no Fotos                                |
+| `SAVE_TO_ICLOUD` (macOS)        | `True`        | copiar cada collage pro iCloud Drive                                |
+| `SAVE_TO_CUSTOM` / `CUSTOM_PATH`| `False` / `""`| copiar para qualquer pasta extra (qualquer SO)                     |
+| `MIN_FREE_SPACE_MB`             | `100`         | aborta antes de baixar se o espaço livre em disco cair abaixo disso |
+| `DOWNLOAD_RETRIES`              | `3`           | tentativas de download antes de desistir                            |
+| `RETRY_BACKOFF_SECS`            | `5`           | delay base entre tentativas, em segundos; dobra a cada tentativa (5s, 10s, 20s…) |
+
+---
+
+## Confiabilidade
+
+- Antes de baixar, o script checa o espaço livre em disco (`MIN_FREE_SPACE_MB`). Se não houver espaço suficiente, ele falha imediatamente em vez de gastar tentativas de download à toa.
+- O download valida tanto o `Content-Type` HTTP quanto a assinatura/tamanho real do arquivo PNG, então uma resposta truncada ou não-imagem (ex: uma página HTML de erro do tapmusic.net) é tratada como falha passível de nova tentativa, em vez de ser salva silenciosamente.
+- Erros de DNS/conectividade são identificados explicitamente no log, deixando claro quando o problema é "sem internet" e não uma resposta ruim do servidor.
+- A última linha do log reflete o que realmente aconteceu: `RESULT: OK` só se todas as etapas habilitadas tiverem sucesso, `RESULT: PARTIAL` se a collage foi baixada mas alguma etapa opcional falhou (import no Fotos, cópia pro iCloud, cópia customizada), `RESULT: FAIL` se o download em si falhou.
 
 ---
 

@@ -2,9 +2,13 @@
 tapmusic.py — Last.fm weekly album collage generator via tapmusic.net
 Usage: python tapmusic.py
 Output: always saves to Imagens/; optional destinations configured below
+Works on macOS, Windows and Linux — macOS-only steps (Photos/iCloud) are
+skipped automatically on other platforms.
 """
 
 import urllib.request
+import urllib.error
+import socket
 import subprocess
 import shutil
 import os
@@ -28,6 +32,8 @@ PLAYCOUNT = False         # show play count on collage
 
 # macOS — import into the Photos app (may time out if Mac is locked)
 SAVE_TO_PHOTOS = True
+PHOTOS_IMPORT_TIMEOUT_SECS = 60   # Photos can be slow to cold-start; bumped from 30s
+PHOTOS_IMPORT_RETRIES      = 2    # total attempts (helps when Photos was still launching)
 
 # macOS — copy to iCloud Drive so the image syncs to iPhone
 SAVE_TO_ICLOUD = True
@@ -46,7 +52,18 @@ CUSTOM_PATH    = ""
 
 # ─── Retry settings ────────────────────────────────────────────────────────────
 DOWNLOAD_RETRIES     = 3     # attempts for the collage download step
-RETRY_BACKOFF_SECS   = 5     # base delay between retries (doubles each attempt)
+RETRY_BACKOFF_SECS   = 5     # base delay in seconds; DOUBLES each retry (5s, 10s, 20s, ...)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ─── Image validation settings ─────────────────────────────────────────────────
+PNG_SIGNATURE   = b"\x89PNG\r\n\x1a\n"
+MIN_IMAGE_BYTES = 2048   # anything smaller is almost certainly a truncated/broken file
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ─── Disk space settings ───────────────────────────────────────────────────────
+# Checked before the download even starts, so a full disk fails fast instead
+# of burning through download retries for nothing.
+MIN_FREE_SPACE_MB = 100
 # ──────────────────────────────────────────────────────────────────────────────
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -82,12 +99,36 @@ def setup_logger():
     file_handler.setFormatter(fmt)
     logger.addHandler(file_handler)
 
-    # Also mirror to stdout so launchd/manual runs still show live output.
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Also mirror to stdout so launchd/cron/Task Scheduler runs still show live output.
+    # encoding="utf-8" with errors="replace" keeps this from crashing on Windows
+    # consoles whose default code page can't render the ✓/✗/→ characters.
+    console_stream = sys.stdout
+    if hasattr(console_stream, "reconfigure"):
+        try:
+            console_stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    console_handler = logging.StreamHandler(console_stream)
     console_handler.setFormatter(fmt)
     logger.addHandler(console_handler)
 
     return logger
+
+
+def has_enough_disk_space(path, min_mb, log):
+    """Check free space on the volume containing `path` (works on Win/macOS/Linux)."""
+    try:
+        free_mb = shutil.disk_usage(path).free / (1024 * 1024)
+    except Exception as e:
+        log.warning(f"⚠ Could not check disk space for {path}: {e}")
+        return True  # don't block the run if the check itself is unavailable
+
+    if free_mb < min_mb:
+        log.error(
+            f"✗ Low disk space: {free_mb:.0f}MB free (need at least {min_mb}MB) on {path}"
+        )
+        return False
+    return True
 
 
 def run():
@@ -95,6 +136,7 @@ def run():
     os.makedirs(LOGS_DIR, exist_ok=True)
 
     log = setup_logger()
+    had_warning = False  # tracks non-fatal failures in optional steps for the final RESULT line
 
     log.info("=" * 60)
     log.info("Run started")
@@ -115,6 +157,12 @@ def run():
     log.info(f"→ Generating collage for '{USERNAME}' ({PERIOD}, {SIZE})...")
     log.info(f"→ URL: {url}")
 
+    # 0. Make sure there's enough room before the network call, so a full disk
+    #    fails fast instead of burning through DOWNLOAD_RETRIES for nothing.
+    if not has_enough_disk_space(IMAGES_DIR, MIN_FREE_SPACE_MB, log):
+        log.error("RESULT: FAIL")
+        sys.exit(1)
+
     # 1. Download the image (with retries for transient failures)
     downloaded = False
     last_error = None
@@ -124,9 +172,13 @@ def run():
             with urllib.request.urlopen(req, timeout=60) as response:
                 content_type = response.headers.get("Content-Type", "")
                 body = response.read()
+
                 if "image" not in content_type:
                     snippet = body[:300].decode("utf-8", errors="replace")
                     last_error = f"Unexpected response: {content_type} — body: {snippet!r}"
+                    log.warning(f"✗ {last_error} (attempt {attempt}/{DOWNLOAD_RETRIES})")
+                elif not body.startswith(PNG_SIGNATURE) or len(body) < MIN_IMAGE_BYTES:
+                    last_error = f"Response looked truncated/corrupted ({len(body)} bytes)"
                     log.warning(f"✗ {last_error} (attempt {attempt}/{DOWNLOAD_RETRIES})")
                 else:
                     with open(output, "wb") as f:
@@ -134,12 +186,18 @@ def run():
                     log.info(f"✓ Image saved: {output}")
                     downloaded = True
                     break
+        except urllib.error.URLError as e:
+            if isinstance(e.reason, socket.gaierror):
+                last_error = f"DNS/connection error — check your internet connection ({e.reason})"
+            else:
+                last_error = str(e)
+            log.warning(f"✗ Download error: {last_error} (attempt {attempt}/{DOWNLOAD_RETRIES})")
         except Exception as e:
             last_error = str(e)
             log.warning(f"✗ Download error: {e} (attempt {attempt}/{DOWNLOAD_RETRIES})")
 
         if attempt < DOWNLOAD_RETRIES:
-            delay = RETRY_BACKOFF_SECS * attempt
+            delay = RETRY_BACKOFF_SECS * (2 ** (attempt - 1))
             log.info(f"→ Retrying in {delay}s...")
             time.sleep(delay)
 
@@ -151,22 +209,36 @@ def run():
     # 2. macOS — Photos app
     if IS_MACOS and SAVE_TO_PHOTOS:
         log.info("→ Importing to Photos app...")
-        try:
-            result = subprocess.run(
-                [
-                    "osascript", "-e",
-                    f'tell application "Photos" to import POSIX file "{output}"',
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode == 0:
-                log.info("✓ Imported to Photos app!")
-            else:
-                log.warning(f"⚠ Photos app failed: {result.stderr.strip()}")
-        except Exception as e:
-            log.warning(f"⚠ Photos app unavailable: {e}")
+        photos_ok = False
+        for photos_attempt in range(1, PHOTOS_IMPORT_RETRIES + 1):
+            try:
+                result = subprocess.run(
+                    [
+                        "osascript", "-e",
+                        f'tell application "Photos" to import POSIX file "{output}"',
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=PHOTOS_IMPORT_TIMEOUT_SECS,
+                )
+                if result.returncode == 0:
+                    log.info("✓ Imported to Photos app!")
+                    photos_ok = True
+                    break
+                log.warning(
+                    f"⚠ Photos app failed: {result.stderr.strip()} "
+                    f"(attempt {photos_attempt}/{PHOTOS_IMPORT_RETRIES})"
+                )
+            except Exception as e:
+                log.warning(
+                    f"⚠ Photos app unavailable: {e} "
+                    f"(attempt {photos_attempt}/{PHOTOS_IMPORT_RETRIES})"
+                )
+            if photos_attempt < PHOTOS_IMPORT_RETRIES:
+                log.info("→ Retrying Photos import (app may still be launching)...")
+
+        if not photos_ok:
+            had_warning = True
 
     # 3. macOS — iCloud Drive
     if IS_MACOS and SAVE_TO_ICLOUD:
@@ -178,11 +250,13 @@ def run():
             log.info(f"✓ Copied to iCloud: {icloud_dest}")
         except Exception as e:
             log.error(f"✗ iCloud copy error: {e}")
+            had_warning = True
 
     # 4. Custom destination (any OS)
     if SAVE_TO_CUSTOM:
         if not CUSTOM_PATH:
             log.warning("⚠ SAVE_TO_CUSTOM is True but CUSTOM_PATH is empty — skipping.")
+            had_warning = True
         else:
             os.makedirs(CUSTOM_PATH, exist_ok=True)
             custom_dest = os.path.join(CUSTOM_PATH, filename)
@@ -192,9 +266,14 @@ def run():
                 log.info(f"✓ Copied to: {custom_dest}")
             except Exception as e:
                 log.error(f"✗ Custom copy error: {e}")
+                had_warning = True
 
-    log.info("Done.")
-    log.info("RESULT: OK")
+    if had_warning:
+        log.warning("Done with warnings — see above.")
+        log.warning("RESULT: PARTIAL")
+    else:
+        log.info("Done.")
+        log.info("RESULT: OK")
 
 
 if __name__ == "__main__":
