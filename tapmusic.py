@@ -57,6 +57,7 @@ RETRY_BACKOFF_SECS   = 5     # base delay in seconds; DOUBLES each retry (5s, 10
 
 # ─── Image validation settings ─────────────────────────────────────────────────
 PNG_SIGNATURE   = b"\x89PNG\r\n\x1a\n"
+JPEG_SIGNATURE  = b"\xff\xd8\xff"
 MIN_IMAGE_BYTES = 2048   # anything smaller is almost certainly a truncated/broken file
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -142,14 +143,16 @@ def run():
     log.info("Run started")
 
     date_str = datetime.now().strftime("%Y-%m-%d")
-    filename = f"tapmusic_{date_str}.png"
-    output   = os.path.join(IMAGES_DIR, filename)
+    # Extension/filename are finalized once we know the actual image format
+    # returned by tapmusic.net (it has switched between PNG and JPEG before).
+    filename = None
+    output   = None
 
     caption_val   = "1" if CAPTIONS  else "0"
     playcount_val = "1" if PLAYCOUNT else "0"
 
     url = (
-        f"https://tapmusic.net/collage.php"
+        f"https://www.tapmusic.net/collage.php"
         f"?user={USERNAME}&type={PERIOD}&size={SIZE}"
         f"&caption={caption_val}&playcount={playcount_val}"
     )
@@ -177,15 +180,29 @@ def run():
                     snippet = body[:300].decode("utf-8", errors="replace")
                     last_error = f"Unexpected response: {content_type} — body: {snippet!r}"
                     log.warning(f"✗ {last_error} (attempt {attempt}/{DOWNLOAD_RETRIES})")
-                elif not body.startswith(PNG_SIGNATURE) or len(body) < MIN_IMAGE_BYTES:
-                    last_error = f"Response looked truncated/corrupted ({len(body)} bytes)"
-                    log.warning(f"✗ {last_error} (attempt {attempt}/{DOWNLOAD_RETRIES})")
                 else:
-                    with open(output, "wb") as f:
-                        f.write(body)
-                    log.info(f"✓ Image saved: {output}")
-                    downloaded = True
-                    break
+                    # tapmusic.net has switched image formats before (PNG <-> JPEG),
+                    # so pick the extension/signature check from the real Content-Type
+                    # instead of assuming PNG.
+                    if "jpeg" in content_type or "jpg" in content_type:
+                        ext, valid_sig = ".jpg", body.startswith(JPEG_SIGNATURE)
+                    elif "png" in content_type:
+                        ext, valid_sig = ".png", body.startswith(PNG_SIGNATURE)
+                    else:
+                        ext = ".png"
+                        valid_sig = body.startswith(PNG_SIGNATURE) or body.startswith(JPEG_SIGNATURE)
+
+                    if not valid_sig or len(body) < MIN_IMAGE_BYTES:
+                        last_error = f"Response looked truncated/corrupted ({len(body)} bytes, {content_type})"
+                        log.warning(f"✗ {last_error} (attempt {attempt}/{DOWNLOAD_RETRIES})")
+                    else:
+                        filename = f"tapmusic_{date_str}{ext}"
+                        output   = os.path.join(IMAGES_DIR, filename)
+                        with open(output, "wb") as f:
+                            f.write(body)
+                        log.info(f"✓ Image saved: {output}")
+                        downloaded = True
+                        break
         except urllib.error.URLError as e:
             if isinstance(e.reason, socket.gaierror):
                 last_error = f"DNS/connection error — check your internet connection ({e.reason})"

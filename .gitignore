@@ -1,5 +1,6 @@
 # Generated images (keep folder, ignore contents)
 Imagens/*.png
+Imagens/*.jpg
 
 # Logs
 Logs/*.log
