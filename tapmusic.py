@@ -31,12 +31,12 @@ PLAYCOUNT = False         # show play count on collage
 # Enable extra destinations below as needed.
 
 # macOS — import into the Photos app (may time out if Mac is locked)
-SAVE_TO_PHOTOS = True
+SAVE_TO_PHOTOS = False
 PHOTOS_IMPORT_TIMEOUT_SECS = 60   # Photos can be slow to cold-start; bumped from 30s
 PHOTOS_IMPORT_RETRIES      = 2    # total attempts (helps when Photos was still launching)
 
 # macOS — copy to iCloud Drive so the image syncs to iPhone
-SAVE_TO_ICLOUD = True
+SAVE_TO_ICLOUD = False
 ICLOUD_FOLDER  = os.path.expanduser(
     "~/Library/Mobile Documents/com~apple~CloudDocs/Tapmusic"
 )
